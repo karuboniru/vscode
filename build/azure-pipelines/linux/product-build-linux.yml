@@ -97,14 +97,24 @@ steps:
         fi
         echo "Yarn failed $i, trying again..."
       done
-
-      # remove once https://github.com/prebuild/prebuild-install/pull/140 is merged and found in keytar
-      cd ./node_modules/keytar
-      npx node-gyp rebuild
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
     displayName: Install dependencies
+    condition: and(succeeded(), ne(variables.NODE_MODULES_RESTORED, 'true'))
+
+  - script: |
+      set -e
+      export npm_config_arch=$(NPM_ARCH)
+      export npm_config_build_from_source=true
+      export npm_config_runtime=electron
+      export npm_config_disturl="https://electronjs.org/headers"
+      export npm_config_target=$(node -p "require('./build/lib/util').getElectronVersion()")
+      # remove once https://github.com/prebuild/prebuild-install/pull/140 is merged and found in keytar
+      cd ./node_modules/keytar
+      npx npm install
+      npx node-gyp rebuild
+    displayName: Rebuild keytar
     condition: and(succeeded(), ne(variables.NODE_MODULES_RESTORED, 'true'))
 
   - script: |
@@ -181,7 +191,7 @@ steps:
       VSCODE_REMOTE_SERVER_PATH="$(agent.builddirectory)/vscode-reh-web-linux-$(VSCODE_ARCH)" \
       DISPLAY=:10 ./resources/server/test/test-web-integration.sh --browser chromium
     displayName: Run integration tests (Browser)
-    timeoutInMinutes: 7
+    timeoutInMinutes: 10
     condition: and(succeeded(), eq(variables['VSCODE_ARCH'], 'x64'), eq(variables['VSCODE_STEP_ON_IT'], 'false'))
 
   - script: |

@@ -8,7 +8,7 @@ import { Action } from 'vs/base/common/actions';
 import { Codicon } from 'vs/base/common/codicons';
 import { KeyCode, KeyMod } from 'vs/base/common/keyCodes';
 import { Schemas } from 'vs/base/common/network';
-import { isWindows } from 'vs/base/common/platform';
+import { isWindows, isLinux } from 'vs/base/common/platform';
 import { withNullAsUndefined } from 'vs/base/common/types';
 import { URI } from 'vs/base/common/uri';
 import { ICodeEditorService } from 'vs/editor/browser/services/codeEditorService';
@@ -127,6 +127,19 @@ export function registerTerminalActions() {
 				terminalService.setActiveInstance(instance);
 			}
 			await terminalService.showPanel(true);
+		}
+	});
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: TERMINAL_COMMAND_ID.NEW_WITH_PROFILE,
+				title: { value: localize('workbench.action.terminal.newWithProfile', "Create New Integrated Terminal (With Profile)"), original: 'Create New Integrated Terminal (With Profile)' },
+				f1: true,
+				category
+			});
+		}
+		async run(accessor: ServicesAccessor) {
+			await accessor.get(ITerminalService).showProfileQuickPick('createInstance');
 		}
 	});
 	registerAction2(class extends Action2 {
@@ -670,9 +683,13 @@ export function registerTerminalActions() {
 			const labelService = accessor.get(ILabelService);
 			const remoteAgentService = accessor.get(IRemoteAgentService);
 			const notificationService = accessor.get(INotificationService);
-			const offProcTerminalService = remoteAgentService.getConnection() ? accessor.get(IRemoteTerminalService) : accessor.get(ILocalTerminalService);
-			const remoteTerms = await offProcTerminalService.listProcesses();
-			const unattachedTerms = remoteTerms.filter(term => !terminalService.isAttachedToTerminal(term));
+			let offProcTerminalService = remoteAgentService.getConnection() ? accessor.get(IRemoteTerminalService) : accessor.get(ILocalTerminalService);
+
+			const terms = await offProcTerminalService.listProcesses();
+
+			offProcTerminalService.reduceConnectionGraceTime();
+
+			const unattachedTerms = terms.filter(term => !terminalService.isAttachedToTerminal(term));
 			const items = unattachedTerms.map(term => {
 				const cwdLabel = labelService.getUriLabel(URI.file(term.cwd));
 				return {
@@ -1345,7 +1362,7 @@ export function registerTerminalActions() {
 			});
 		}
 		async run(accessor: ServicesAccessor) {
-			await accessor.get(ITerminalService).selectDefaultProfile();
+			await accessor.get(ITerminalService).showProfileQuickPick('setDefault');
 		}
 	});
 	registerAction2(class extends Action2 {
@@ -1429,6 +1446,28 @@ export function registerTerminalActions() {
 		});
 	}
 
+	if (BrowserFeatures.clipboard.readText && isLinux) {
+		registerAction2(class extends Action2 {
+			constructor() {
+				super({
+					id: TERMINAL_COMMAND_ID.PASTE_SELECTION,
+					title: { value: localize('workbench.action.terminal.pasteSelection', "Paste Selection into Active Terminal"), original: 'Paste Selection into Active Terminal' },
+					f1: true,
+					category,
+					precondition: KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED,
+					keybinding: [{
+						linux: { primary: KeyMod.Shift | KeyCode.Insert },
+						weight: KeybindingWeight.WorkbenchContrib,
+						when: KEYBINDING_CONTEXT_TERMINAL_FOCUS
+					}],
+				});
+			}
+			async run(accessor: ServicesAccessor) {
+				await accessor.get(ITerminalService).getActiveInstance()?.pasteSelection();
+			}
+		});
+	}
+
 	const switchTerminalTitle: ICommandActionTitle = { value: localize('workbench.action.terminal.switchTerminal', "Switch Terminal"), original: 'Switch Terminal' };
 	registerAction2(class extends Action2 {
 		constructor() {
@@ -1453,7 +1492,7 @@ export function registerTerminalActions() {
 			}
 			if (item === selectDefaultProfileTitle) {
 				terminalService.refreshActiveTab();
-				return terminalService.selectDefaultProfile();
+				return terminalService.showProfileQuickPick('setDefault');
 			}
 			if (item === configureTerminalSettingsTitle) {
 				await commandService.executeCommand(TERMINAL_COMMAND_ID.CONFIGURE_TERMINAL_SETTINGS);

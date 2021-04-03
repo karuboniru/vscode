@@ -29,10 +29,11 @@ import { IEditorRegistry, Extensions as EditorExtensions, EditorDescriptor } fro
 import { WorkspaceTrustEditor } from 'vs/workbench/contrib/workspace/browser/workspaceTrustEditor';
 import { WorkspaceTrustEditorInput } from 'vs/workbench/services/workspaces/browser/workspaceTrustEditorInput';
 import { WorkspaceTrustContext, WORKSPACE_TRUST_ENABLED } from 'vs/workbench/services/workspaces/common/workspaceTrust';
-import { EditorInput, Extensions as EditorInputExtensions, IEditorInputFactory, IEditorInputFactoryRegistry } from 'vs/workbench/common/editor';
+import { EditorInput, Extensions as EditorInputExtensions, IEditorInputSerializer, IEditorInputFactoryRegistry } from 'vs/workbench/common/editor';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
 import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
+import { IStorageService, StorageScope, StorageTarget } from 'vs/platform/storage/common/storage';
 
 const workspaceTrustIcon = registerIcon('workspace-trust-icon', Codicon.shield, localize('workspaceTrustIcon', "Icon for workspace trust badge."));
 
@@ -42,6 +43,7 @@ const workspaceTrustIcon = registerIcon('workspace-trust-icon', Codicon.shield, 
 export class WorkspaceTrustRequestHandler extends Disposable implements IWorkbenchContribution {
 	private readonly requestModel = this.workspaceTrustService.requestModel;
 	private readonly badgeDisposable = this._register(new MutableDisposable());
+	private shouldShowManagementEditor = true;
 
 	constructor(
 		@IHostService private readonly hostService: IHostService,
@@ -53,6 +55,7 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 		@IExtensionService private readonly extensionService: IExtensionService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@IWorkspaceTrustService private readonly workspaceTrustService: IWorkspaceTrustService,
+		@IStorageService private readonly storageService: IStorageService,
 	) {
 		super();
 
@@ -67,6 +70,13 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 				badge: new IconBadge(workspaceTrustIcon, () => localize('requestTrustIconText', "Some features require workspace trust.")),
 				priority: 10
 			});
+
+			const managementEditorShownKey = 'workspace.trust.management.shown';
+			const seen = this.storageService.getBoolean(managementEditorShownKey, StorageScope.WORKSPACE, false);
+			if (!seen && this.shouldShowManagementEditor) {
+				this.storageService.store(managementEditorShownKey, true, StorageScope.WORKSPACE, StorageTarget.MACHINE);
+				this.commandService.executeCommand('workbench.trust.manage');
+			}
 		}
 	}
 
@@ -140,7 +150,7 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 		}));
 
 		this._register(this.requestModel.onDidCompleteRequest(trustState => {
-			if (trustState !== undefined && trustState !== WorkspaceTrustState.Unknown) {
+			if (trustState !== undefined && trustState !== WorkspaceTrustState.Unspecified) {
 				this.toggleRequestBadge(false);
 			}
 		}));
@@ -170,7 +180,7 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 			}
 
 			// Hide soft request badge
-			if (trustState.currentTrustState !== undefined && trustState.currentTrustState !== WorkspaceTrustState.Unknown) {
+			if (trustState.currentTrustState !== undefined && trustState.currentTrustState !== WorkspaceTrustState.Unspecified) {
 				this.toggleRequestBadge(false);
 			}
 		}));
@@ -189,6 +199,9 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 				}
 			}
 		}));
+
+		// Don't auto-show the UX editor if the request is 5 seconds after startup
+		setTimeout(() => { this.shouldShowManagementEditor = false; }, 5000);
 	}
 }
 
@@ -261,7 +274,7 @@ Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).regi
 /**
  * Trusted Workspace GUI Editor
  */
-class WorkspaceTrustEditorInputFactory implements IEditorInputFactory {
+class WorkspaceTrustEditorInputSerializer implements IEditorInputSerializer {
 
 	canSerialize(editorInput: EditorInput): boolean {
 		return true;
@@ -277,7 +290,7 @@ class WorkspaceTrustEditorInputFactory implements IEditorInputFactory {
 }
 
 Registry.as<IEditorInputFactoryRegistry>(EditorInputExtensions.EditorInputFactories)
-	.registerEditorInputFactory(WorkspaceTrustEditorInput.ID, WorkspaceTrustEditorInputFactory);
+	.registerEditorInputSerializer(WorkspaceTrustEditorInput.ID, WorkspaceTrustEditorInputSerializer);
 
 Registry.as<IEditorRegistry>(EditorExtensions.Editors).registerEditor(
 	EditorDescriptor.create(

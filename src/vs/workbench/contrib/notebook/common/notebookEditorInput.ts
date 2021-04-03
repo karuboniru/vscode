@@ -14,6 +14,7 @@ import { INotebookEditorModelResolverService } from 'vs/workbench/contrib/notebo
 import { IReference } from 'vs/base/common/lifecycle';
 import { IResolvedNotebookEditorModel } from 'vs/workbench/contrib/notebook/common/notebookCommon';
 import { ILabelService } from 'vs/platform/label/common/label';
+import { Schemas } from 'vs/base/common/network';
 
 interface NotebookEditorInputOptions {
 	startDirty?: boolean;
@@ -47,6 +48,12 @@ export class NotebookEditorInput extends EditorInput {
 		this._name = labelService.getUriBasenameLabel(resource);
 	}
 
+	dispose() {
+		this._editorModelReference?.dispose();
+		this._editorModelReference = null;
+		super.dispose();
+	}
+
 	getTypeId(): string {
 		return NotebookEditorInput.ID;
 	}
@@ -63,7 +70,7 @@ export class NotebookEditorInput extends EditorInput {
 	}
 
 	isUntitled(): boolean {
-		return this._editorModelReference?.object.isUntitled() || false;
+		return this.resource.scheme === Schemas.untitled;
 	}
 
 	isReadonly() {
@@ -115,18 +122,10 @@ export class NotebookEditorInput extends EditorInput {
 
 				return `${pattern.include} (exclude: ${pattern.exclude})`;
 			}).join(', ');
-			throw new Error(`File name ${target} is not supported by ${provider.providerDisplayName}.
-
-Please make sure the file name matches following patterns:
-${patterns}
-`);
+			throw new Error(`File name ${target} is not supported by ${provider.providerDisplayName}.\n\nPlease make sure the file name matches following patterns:\n${patterns}`);
 		}
 
-		if (!await this._editorModelReference.object.saveAs(target)) {
-			return undefined;
-		}
-
-		return this._move(group, target)?.editor;
+		return await this._editorModelReference.object.saveAs(target);
 	}
 
 	private async _suggestName(suggestedFilename: string) {
@@ -172,6 +171,8 @@ ${patterns}
 			if (this._editorModelReference.object.isDirty()) {
 				this._onDidChangeDirty.fire();
 			}
+		} else {
+			this._editorModelReference.object.load();
 		}
 
 		return this._editorModelReference.object;
@@ -185,11 +186,5 @@ ${patterns}
 			return this.viewType === otherInput.viewType && isEqual(this.resource, otherInput.resource);
 		}
 		return false;
-	}
-
-	dispose() {
-		this._editorModelReference?.dispose();
-		this._editorModelReference = null;
-		super.dispose();
 	}
 }

@@ -7,7 +7,6 @@ import * as DOM from 'vs/base/browser/dom';
 import { IListRenderer, IListVirtualDelegate } from 'vs/base/browser/ui/list/list';
 import { NotImplementedError } from 'vs/base/common/errors';
 import { Emitter, Event } from 'vs/base/common/event';
-import { Schemas } from 'vs/base/common/network';
 import { URI } from 'vs/base/common/uri';
 import { ITextModelService } from 'vs/editor/common/services/resolverService';
 import { ContextKeyService } from 'vs/platform/contextkey/browser/contextKeyService';
@@ -15,7 +14,7 @@ import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
 import { IListService, ListService } from 'vs/platform/list/browser/listService';
 import { IUndoRedoService } from 'vs/platform/undoRedo/common/undoRedo';
-import { EditorModel } from 'vs/workbench/common/editor';
+import { EditorModel, IEditorInput } from 'vs/workbench/common/editor';
 import { ICellViewModel, IActiveNotebookEditor } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
 import { NotebookEventDispatcher } from 'vs/workbench/contrib/notebook/browser/viewModel/eventDispatcher';
 import { CellViewModel, NotebookViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/notebookViewModel';
@@ -33,7 +32,8 @@ import { TestThemeService } from 'vs/platform/theme/test/common/testThemeService
 import { NotebookCellList } from 'vs/workbench/contrib/notebook/browser/view/notebookCellList';
 import { ListViewInfoAccessor } from 'vs/workbench/contrib/notebook/browser/notebookEditorWidget';
 import { mock } from 'vs/base/test/common/mock';
-import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
+import { IClipboardService } from 'vs/platform/clipboard/common/clipboardService';
+import { BrowserClipboardService } from 'vs/platform/clipboard/browser/clipboardService';
 
 export class TestCell extends NotebookCellTextModel {
 	constructor(
@@ -92,10 +92,6 @@ export class NotebookEditorTestModel extends EditorModel implements INotebookEdi
 		return this._dirty;
 	}
 
-	isUntitled() {
-		return this._notebook.uri.scheme === Schemas.untitled;
-	}
-
 	getNotebook(): NotebookTextModel {
 		return this._notebook;
 	}
@@ -116,7 +112,7 @@ export class NotebookEditorTestModel extends EditorModel implements INotebookEdi
 		return false;
 	}
 
-	saveAs(): Promise<boolean> {
+	saveAs(): Promise<IEditorInput | undefined> {
 		throw new NotImplementedError();
 	}
 
@@ -134,12 +130,13 @@ export function setupInstantiationService() {
 	instantiationService.stub(ITextModelService, <ITextModelService>instantiationService.createInstance(TextModelResolverService));
 	instantiationService.stub(IContextKeyService, instantiationService.createInstance(ContextKeyService));
 	instantiationService.stub(IListService, instantiationService.createInstance(ListService));
+	instantiationService.stub(IClipboardService, new BrowserClipboardService());
 
 	return instantiationService;
 }
 
-export async function withTestNotebook<R = any>(cells: [source: string, lang: string, kind: CellKind, output?: IOutputDto[], metadata?: NotebookCellMetadata][], callback: (editor: IActiveNotebookEditor, accessor: ServicesAccessor) => Promise<R> | R): Promise<R> {
-	const instantiationService = setupInstantiationService();
+function _createTestNotebookEditor(instantiationService: TestInstantiationService, cells: [source: string, lang: string, kind: CellKind, output?: IOutputDto[], metadata?: NotebookCellMetadata][]): IActiveNotebookEditor {
+
 	const viewType = 'notebook';
 	const notebook = instantiationService.createInstance(NotebookTextModel, viewType, URI.parse('test'), cells.map(cell => {
 		return {
@@ -160,6 +157,9 @@ export async function withTestNotebook<R = any>(cells: [source: string, lang: st
 	const listViewInfoAccessor = new ListViewInfoAccessor(cellList);
 
 	const notebookEditor: IActiveNotebookEditor = new class extends mock<IActiveNotebookEditor>() {
+		dispose() {
+			viewModel.dispose();
+		}
 		onDidChangeModel: Event<NotebookTextModel | undefined> = new Emitter<NotebookTextModel | undefined>().event;
 		get viewModel() { return viewModel; }
 		hasModel(): this is IActiveNotebookEditor {
@@ -173,13 +173,36 @@ export async function withTestNotebook<R = any>(cells: [source: string, lang: st
 		setHiddenAreas(_ranges: ICellRange[]): boolean {
 			return cellList.setHiddenAreas(_ranges, true);
 		}
+		getActiveCell() {
+			const elements = cellList.getFocusedElements();
+
+			if (elements && elements.length) {
+				return elements[0];
+			}
+
+			return undefined;
+		}
+		hasOutputTextSelection() {
+			return false;
+		}
 	};
+
+	return notebookEditor;
+}
+
+export function createTestNotebookEditor(cells: [source: string, lang: string, kind: CellKind, output?: IOutputDto[], metadata?: NotebookCellMetadata][]): IActiveNotebookEditor {
+	return _createTestNotebookEditor(setupInstantiationService(), cells);
+}
+
+export async function withTestNotebook<R = any>(cells: [source: string, lang: string, kind: CellKind, output?: IOutputDto[], metadata?: NotebookCellMetadata][], callback: (editor: IActiveNotebookEditor, accessor: TestInstantiationService) => Promise<R> | R): Promise<R> {
+	const instantiationService = setupInstantiationService();
+	const notebookEditor = _createTestNotebookEditor(instantiationService, cells);
 
 	const res = await callback(notebookEditor, instantiationService);
 	if (res instanceof Promise) {
-		res.finally(() => viewModel.dispose());
+		res.finally(() => notebookEditor.dispose());
 	} else {
-		viewModel.dispose();
+		notebookEditor.dispose();
 	}
 	return res;
 }

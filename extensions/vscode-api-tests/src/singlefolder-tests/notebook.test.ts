@@ -233,9 +233,6 @@ suite('Notebook API tests', function () {
 				};
 				return dto;
 			},
-			resolveNotebook: async (_document: vscode.NotebookDocument) => {
-				return;
-			},
 			saveNotebook: async (_document: vscode.NotebookDocument, _cancellation: vscode.CancellationToken) => {
 				return;
 			},
@@ -309,6 +306,25 @@ suite('Notebook API tests', function () {
 
 		await closeAllEditors();
 		assert.strictEqual(count, 0);
+	});
+
+	test('correct cell selection on undo/redo of cell creation', async function () {
+		const resource = await createRandomFile('', undefined, '.vsctestnb');
+		await vscode.commands.executeCommand('vscode.openWith', resource, 'notebookCoreTest');
+		await vscode.commands.executeCommand('notebook.cell.insertCodeCellBelow');
+		await vscode.commands.executeCommand('undo');
+		const selectionUndo = [...vscode.window.activeNotebookEditor!.selections];
+		await vscode.commands.executeCommand('redo');
+		const selectionRedo = vscode.window.activeNotebookEditor!.selections;
+
+		// On undo, the selected cell must be the upper cell, ie the first one
+		assert.strictEqual(selectionUndo.length, 1);
+		assert.strictEqual(selectionUndo[0].start, 0);
+		assert.strictEqual(selectionUndo[0].end, 1);
+		// On redo, the selected cell must be the new cell, ie the second one
+		assert.strictEqual(selectionRedo.length, 1);
+		assert.strictEqual(selectionRedo[0].start, 1);
+		assert.strictEqual(selectionRedo[0].end, 2);
 	});
 
 	test('editor editing event 2', async function () {
@@ -1007,6 +1023,27 @@ suite('Notebook API tests', function () {
 		// assert.strictEqual(vscode.window.activeNotebookEditor?.selection?.document.getText(), 'test');
 
 		await saveFileAndCloseAll(resource);
+	});
+
+	test('change cell language when notebook editor is not open', async function () {
+		const resource = await createRandomFile('', undefined, '.vsctestnb');
+		await vscode.commands.executeCommand('vscode.openWith', resource, 'notebookCoreTest');
+		const firstCell = vscode.window.activeNotebookEditor!.document.cellAt(0);
+		const cellUri = firstCell.document.uri;
+		await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+
+		let cellDoc = await vscode.workspace.openTextDocument(cellUri);
+		cellDoc = await vscode.languages.setTextDocumentLanguage(cellDoc, 'css');
+		assert.strictEqual(cellDoc.languageId, 'css');
+	});
+
+	test('change cell language when notebook editor is open', async function () {
+		const resource = await createRandomFile('', undefined, '.vsctestnb');
+		await vscode.commands.executeCommand('vscode.openWith', resource, 'notebookCoreTest');
+
+		const firstCell = vscode.window.activeNotebookEditor!.document.cellAt(0);
+		const cellDoc = await vscode.languages.setTextDocumentLanguage(firstCell.document, 'css');
+		assert.strictEqual(cellDoc.languageId, 'css');
 	});
 
 	test('multiple tabs: dirty + clean', async function () {

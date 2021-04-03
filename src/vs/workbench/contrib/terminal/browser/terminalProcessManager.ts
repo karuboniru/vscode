@@ -499,6 +499,13 @@ export class TerminalProcessManager extends Disposable implements ITerminalProce
 		}
 	}
 
+	public async processBinary(data: string): Promise<void> {
+		await this.ptyProcessReady;
+		this._dataFilter.triggerSwap();
+		this._hasWrittenData = true;
+		this._process?.processBinary(data);
+	}
+
 	public getInitialCwd(): Promise<string> {
 		return Promise.resolve(this._initialCwd ? this._initialCwd : '');
 	}
